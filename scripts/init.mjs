@@ -82,7 +82,7 @@ if (!/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/.test(name)) {
 
 // ── package.json ────────────────────────────────────────────────────────────
 pkg.name = name;
-pkg.version = '0.0.0';
+pkg.version = '0.0.1'; // first release publishes this as-is: `pnpm release`
 pkg.description = description || TEMPLATE.description;
 pkg.author = author;
 pkg.homepage = `https://github.com/${repo}#readme`;
@@ -126,5 +126,5 @@ Next:
   pnpm run check
   git add -A && git commit -m "chore: init from npm-package-template"
 
-First publish:  npm login && pnpm release patch
+First publish (v0.0.1):  npm login && pnpm release
 `);
