@@ -1,0 +1,77 @@
+# Publishes to npm when a v* tag is pushed (e.g. by `pnpm release patch --ci`).
+# If the version is already on npm (released locally with `pnpm release`), the publish step is skipped.
+#
+# Auth — pick one:
+#   A. Trusted publishing (recommended, no secret): on npmjs.com → package → Settings →
+#      Trusted Publisher → GitHub Actions, repo = <owner>/<repo>, workflow = release.yml.
+#      (The package must exist first: do the very first publish locally.)
+#   B. Token: add an npm "Automation"/granular token as the repo secret NPM_TOKEN.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create the GitHub Release
+  id-token: write # npm trusted publishing + provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      # Trusted publishing needs npm >= 11.5.1
+      - run: npm install -g npm@latest
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package.json
+        id: meta
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $VERSION"; exit 1
+          fi
+          if [[ "$VERSION" == *-* ]]; then
+            ID=$(echo "$VERSION" | sed -E 's/^[^-]+-([a-zA-Z]+).*/\1/'); [[ "$ID" =~ ^[a-zA-Z]+$ ]] || ID=next
+            echo "tag=$ID" >> "$GITHUB_OUTPUT"; echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"; echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: pnpm run check
+        if: steps.meta.outputs.published == 'false'
+      - run: node scripts/smoke.mjs --no-build
+        if: steps.meta.outputs.published == 'false'
+
+      - name: Publish
+        if: steps.meta.outputs.published == 'false'
+        run: npm publish --provenance --access public --tag ${{ steps.meta.outputs.tag }} --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: GitHub Release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Pull this version's section out of CHANGELOG.md
+          awk -v v="## $GITHUB_REF_NAME " 'index($0, v)==1 {f=1; next} /^## v/ {f=0} f' CHANGELOG.md > notes.md || true
+          [ -s notes.md ] || echo "Release $GITHUB_REF_NAME" > notes.md
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md \
+              $([ "${{ steps.meta.outputs.prerelease }}" = "true" ] && echo --prerelease)
+        env:
+          GH_TOKEN: ${{ github.token }}

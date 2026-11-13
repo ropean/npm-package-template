@@ -1,0 +1,74 @@
+{
+  "name": "@ropean/npm-package-template",
+  "version": "0.0.0",
+  "description": "TODO: one-line description",
+  "keywords": [],
+  "homepage": "https://github.com/ropean/npm-package-template#readme",
+  "bugs": {
+    "url": "https://github.com/ropean/npm-package-template/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ropean/npm-package-template.git"
+  },
+  "license": "MIT",
+  "author": "ropean",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "bin": {
+    "my-cli": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "dev": "tsdown --watch",
+    "build": "tsdown",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint --deny-warnings src",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:exports": "publint --strict && attw --pack . --profile node16",
+    "check": "node scripts/check.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "pack:dry": "npm pack --dry-run",
+    "link:global": "pnpm link --global",
+    "unlink:global": "pnpm remove --global @ropean/npm-package-template",
+    "release": "node scripts/release.mjs",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major",
+    "release:beta": "node scripts/release.mjs prerelease --preid=beta",
+    "prepublishOnly": "pnpm run check"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@types/node": "22.20.5",
+    "oxlint": "1.93.0",
+    "prettier": "3.10.1",
+    "publint": "0.3.25",
+    "tsdown": "0.23.7",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
