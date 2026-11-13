@@ -21,11 +21,16 @@ const fmtMs = (ms) => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
 function runScript(name) {
   return new Promise((resolve) => {
     const start = Date.now();
-    const child = spawn('pnpm', ['run', name], {
+    // Windows needs a shell to resolve pnpm.cmd. Pass a single command string
+    // (not an args array) to avoid DEP0190; `name` only comes from CHECKS.
+    const opts = {
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
       env: { ...process.env, FORCE_COLOR: tty ? '1' : '0' },
-    });
+    };
+    const child =
+      process.platform === 'win32'
+        ? spawn(`pnpm run ${name}`, { ...opts, shell: true })
+        : spawn('pnpm', ['run', name], opts);
     let output = '';
     child.stdout.on('data', (d) => (output += d));
     child.stderr.on('data', (d) => (output += d));

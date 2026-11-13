@@ -1,0 +1,2 @@
+# Force LF everywhere (incl. Windows CI checkouts) so Prettier's endOfLine: "lf" passes.
+* text=auto eol=lf
