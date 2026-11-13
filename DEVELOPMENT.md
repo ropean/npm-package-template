@@ -113,6 +113,14 @@ cd ../consumer && pnpm add ../this-package/ropean-xxx-0.1.0.tgz
 
 ### 5.2 本地发版（默认方式）
 
+新包初始版本是 `0.0.1`，**首次发布不带参数**，直接把 0.0.1 发出去：
+
+```bash
+pnpm release              # 首发 v0.0.1（CI 方式：pnpm release --ci）
+```
+
+之后每次发版：
+
 ```bash
 pnpm release patch        # 0.1.0 → 0.1.1
 pnpm release minor        # 0.1.1 → 0.2.0

@@ -557,6 +557,8 @@ async function main() {
     }
     target = currentVersion();
     console.log(`→ Version: ${current} → ${target}`);
+  } else if (bumpArg && !trySh('git tag -l "v*"')) {
+    console.log(`→ First release: publishing v${current} as is (ignoring "${bumpArg}").`);
   } else if (bumpArg) {
     console.log(`→ v${current} is not fully released yet — resuming it (ignoring "${bumpArg}").`);
     console.log('  To drop it instead: `pnpm release --abort`, or `--force-bump` to skip this number.');
@@ -565,7 +567,7 @@ async function main() {
     if (CI_MODE && !isPublished(current)) status();
     return;
   } else {
-    console.log(`→ Resuming release of v${current}`);
+    console.log(`→ ${trySh('git tag -l "v*"') ? 'Resuming release of' : 'First release:'} v${current}`);
   }
   if (target === '0.0.0') fail('Refusing to release 0.0.0.', 'Pass a bump (e.g. `patch`) or an explicit version.');
 
