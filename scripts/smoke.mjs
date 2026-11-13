@@ -12,7 +12,7 @@
 // This catches what unit tests can't: missing files in "files", broken "exports",
 // wrong bin paths / shebangs, deps that are only devDependencies, etc.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -24,8 +24,22 @@ const ROOT = process.cwd();
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const isWin = process.platform === 'win32';
 
-const run = (cmd, cmdArgs, opts = {}) =>
-  execFileSync(cmd, cmdArgs, { stdio: 'pipe', encoding: 'utf8', shell: isWin, ...opts }).trim();
+// Quote one argument for cmd.exe. Arguments here are paths, flags and inline JS,
+// never containing `%`; embedded `"` are doubled.
+const winQuote = (a) => (/^[\w\-.:\\/=@,+]+$/.test(a) ? a : `"${a.replace(/"/g, '""')}"`);
+
+// On Windows, .cmd shims (pnpm, npm, tsc, package bins) need a shell. Build the
+// command string ourselves instead of `shell: true` + args array, which Node
+// concatenates unquoted (DEP0190) and breaks on spaces. `node` itself runs
+// shell-free via process.execPath.
+const run = (cmd, cmdArgs, opts = {}) => {
+  const o = { stdio: 'pipe', encoding: 'utf8', ...opts };
+  const out =
+    isWin && cmd !== process.execPath
+      ? execSync([cmd, ...cmdArgs].map(winQuote).join(' '), o)
+      : execFileSync(cmd, cmdArgs, o);
+  return out.trim();
+};
 
 let step = 0;
 const ok = (msg) => console.log(`  ✓ ${msg}`);
@@ -60,7 +74,7 @@ try {
   if (hasEntry) {
     section('Runtime resolution');
     const esm = run(
-      'node',
+      process.execPath,
       [
         '--input-type=module',
         '-e',
@@ -72,9 +86,13 @@ try {
 
     const hasRequire = typeof rootExport === 'string' || rootExport?.require || rootExport?.default || pkg.main;
     if (hasRequire) {
-      const cjs = run('node', ['-e', `console.log(Object.keys(require(${JSON.stringify(pkg.name)})).join(','))`], {
-        cwd: app,
-      });
+      const cjs = run(
+        process.execPath,
+        ['-e', `console.log(Object.keys(require(${JSON.stringify(pkg.name)})).join(','))`],
+        {
+          cwd: app,
+        },
+      );
       ok(`require() → { ${cjs} }`);
     }
 
