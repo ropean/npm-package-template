@@ -11,8 +11,8 @@
 //
 // Flags:
 //   --yes            skip confirmation prompts (required when not in a TTY)
-//   --ci             don't publish locally: bump + changelog + commit + tag + push, and let
-//                    .github/workflows/release.yml publish from the tag (npm provenance)
+//   --ci             don't publish: bump + changelog + commit + tag + push only (this is what
+//                    .github/workflows/github-release.yml runs on GitHub Actions)
 //   --retag          (--ci) CI failed and you committed a fix: move the unpublished tag to HEAD and re-push it
 //   --tag=<name>     npm dist-tag (default: "latest", or the preid / "next" for prereleases)
 //   --otp=<code>     npm 2FA one-time password (otherwise you're prompted when npm asks for one)
@@ -210,9 +210,7 @@ function preflight() {
   }
   if (!trySh('git remote get-url origin')) fail('No "origin" remote.', 'git remote add origin <url>');
 
-  // Only the files this script itself touches may be dirty (that's an interrupted release).
-  const dirty = dirtyFiles().filter((f) => !OWN_FILES.has(f));
-  if (dirty.length) fail(`Uncommitted changes:\n  ${dirty.join('\n  ')}`, 'Commit or stash them first.');
+  // A dirty working tree is allowed; the release commit only stages the version file and the changelog.
 
   // Remote reachable, branch not behind, and we're allowed to push — all BEFORE publishing.
   if (trySh(`git fetch --quiet origin`) === null) {
@@ -248,6 +246,8 @@ function preflight() {
 
 // ── Publish with error classification ───────────────────────────────────────
 
+const WEB_AUTH_RE = /authId=|\/-\/v1\/done|npm\.com\/auth/i;
+
 const PUBLISH_ERRORS = [
   { kind: 'otp', re: /EOTP|one-time pass|OTP required|requires.*two-factor/i },
   { kind: 'exists', re: /cannot publish over|previously published|EPUBLISHCONFLICT/i },
@@ -269,7 +269,10 @@ const PUBLISH_ERRORS = [
   {
     kind: 'fatal',
     re: /E404|Scope not found|not found/i,
-    hint: `The scope of "${PKG_NAME}" doesn't exist or you're not a member. Use your own npm username/org as the scope.`,
+    hint:
+      `npm returned 404 for "${PKG_NAME}". Either the scope doesn't exist / you're not a member, or the ` +
+      'authentication was rejected (an invalid --otp or a token without publish rights also gives 404). ' +
+      'Check `npm whoami` and `npm org ls <scope>`, then retry without --otp so npm can use passkey web auth.',
   },
   {
     kind: 'fatal',
@@ -293,6 +296,7 @@ const PUBLISH_ERRORS = [
 async function publish(target, tag) {
   const base = `pnpm publish --no-git-checks --ignore-scripts --access public --tag ${tag} ${REG}`;
   let otp = typeof flags.otp === 'string' ? flags.otp : null;
+  let webAuthTried = false;
 
   for (let attempt = 1; attempt <= 4; attempt++) {
     const { code, output } = await runTee(`${base}${otp ? ` --otp=${otp}` : ''}`);
@@ -311,8 +315,28 @@ async function publish(target, tag) {
 
     switch (match.kind) {
       case 'otp': {
-        const code = await prompt('npm needs a 2FA one-time password: ');
+        // npm now uses web authentication (passkey / security key) instead of TOTP codes. When it prints an
+        // authId URL there is no code to type: re-run with a fully inherited TTY so npm can open the browser
+        // and poll until the passkey approval completes.
+        if (WEB_AUTH_RE.test(output) && !otp && !webAuthTried) {
+          webAuthTried = true;
+          console.log('→ npm requested web authentication (passkey). Approve it in the browser when prompted …');
+          const r = spawnSync(base, { cwd: DIR, shell: true, stdio: 'inherit' });
+          if (r.status === 0) return;
+          fail(
+            'npm publish with web authentication failed.',
+            'Make sure a passkey / security key is registered on npmjs.com and approve the browser prompt. ' +
+              'Alternatively run `npm publish --access public` manually, or pass --otp=<6-digit code> if you still have TOTP.',
+          );
+        }
+        const code = await prompt('npm needs a 2FA one-time password (6 digits): ');
         if (!code) fail('npm requires a one-time password.', 'Re-run with --otp=<code> (nothing else needs redoing).');
+        if (!/^\d{6,8}$/.test(code)) {
+          fail(
+            `"${code.slice(0, 12)}…" is not a valid one-time password (expected 6–8 digits).`,
+            'Do not paste the authId / URL / token. Use a passkey (web auth) or a real TOTP code.',
+          );
+        }
         otp = code;
         continue;
       }
@@ -636,7 +660,8 @@ async function main() {
 
   console.log(`\n✓ ${PKG_NAME}@${target} released${CI_MODE ? ' (tag pushed — CI will publish)' : ''}.`);
   if (REGISTRY.includes('registry.npmjs.org')) console.log(`  https://www.npmjs.com/package/${PKG_NAME}/v/${target}`);
-  if (CI_MODE) console.log('  Follow it in GitHub → Actions → Release. Check later with `pnpm release --status`.');
+  if (CI_MODE)
+    console.log('  Follow it in GitHub → Actions → GitHub Release. Check later with `pnpm release --status`.');
 }
 
 let interrupted = false;
