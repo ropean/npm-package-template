@@ -101,12 +101,22 @@ const replaceAll = (s) =>
   s
     .replaceAll(TEMPLATE.name, name)
     .replaceAll(TEMPLATE.repo, repo)
+    .replaceAll(
+      `${TEMPLATE.name.split('/')[0]}:registry`,
+      `${name.startsWith('@') ? name.split('/')[0] : TEMPLATE.name.split('/')[0]}:registry`,
+    )
     .replaceAll(`${TEMPLATE.name.replace(/^@[^/]+\//, '')}.tgz`, `${unscoped}.tgz`)
     .replaceAll(TEMPLATE.bin, bin || unscoped)
     .replaceAll(TEMPLATE.description, description || TEMPLATE.description);
 
 rewrite('README.md', (s) => {
   s = replaceAll(s);
+  // GitHub Packages needs a scoped name: drop that section for unscoped packages, else just remove the markers.
+  s = name.startsWith('@')
+    ? s.replace(/<!-- \/?ghp -->\n+/g, '')
+    : s.replace(/<!-- ghp -->[\s\S]*?<!-- \/ghp -->\n+/g, '');
+  // Drop the "Use this template" section.
+  s = s.replace(/<!-- template -->[\s\S]*?<!-- \/template -->\n+/g, '');
   // Drop the CLI section for pure libraries.
   if (!bin) s = s.replace(/<!-- cli -->[\s\S]*?<!-- \/cli -->\n*/g, '');
   return s.replace(/<!-- \/?cli -->\n/g, '');
