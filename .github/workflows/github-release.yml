@@ -1,0 +1,191 @@
+# GitHub channel: GitHub Release + GitHub Packages. Run it from Actions → "GitHub Release" → Run workflow
+# (on the default branch). Job 1 (`release`) does everything that used to be done locally with
+# `pnpm release --ci` / `git tag`:
+#   bump package.json → CHANGELOG → commit → tag → push → pack → create the GitHub Release with the tarball.
+# Job 2 (`packages`) then publishes that tag to GitHub Packages (npm.pkg.github.com) with the built-in
+# GITHUB_TOKEN (no secret needed). The package scope must equal the repository owner (e.g. @<owner> ↔ github.com/<owner>).
+#
+# Input `version`: patch | minor | major | x.y.z, or `current` to release the version already in package.json
+# (its tag is created first if it does not exist yet, e.g. for the very first release; otherwise only the
+# Release and the GitHub Packages publish are (re)done). A first release with no tags yet always uses the
+# current package.json version, whatever you enter.
+#
+# The tarball is attached twice (versioned name and version-less <package-name>.tgz), so this URL is stable:
+#   npm i -g https://github.com/<owner>/<repo>/releases/latest/download/<package-name>.tgz
+#
+# Installing from GitHub Packages needs a GitHub token with read:packages, even for public packages:
+#   echo "@<owner>:registry=https://npm.pkg.github.com" >> ~/.npmrc
+#   echo "//npm.pkg.github.com/:_authToken=<token>" >> ~/.npmrc
+#   npm i -g @<owner>/<package-name>
+#
+# This channel is independent of npm (see publish-npm.yml). If main is a protected branch, the push of the
+# release commit needs to be allowed for GitHub Actions.
+name: GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'patch | minor | major | x.y.z | current'
+        required: true
+        default: patch
+
+concurrency:
+  group: github-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the release commit and tag, create the Release
+
+jobs:
+  release:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    env:
+      VERSION_INPUT: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10 # package.json has no `packageManager` field, so pin the pnpm major here
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate input
+        run: |
+          if ! [[ "$VERSION_INPUT" =~ ^(patch|minor|major|current|[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?)$ ]]; then
+            echo "::error::version must be patch | minor | major | current | x.y.z, got: $VERSION_INPUT"; exit 1
+          fi
+
+      - name: Bump, CHANGELOG, commit, tag and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$VERSION_INPUT" = "current" ]; then
+            VERSION=$(node -p "require('./package.json').version")
+            if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+              echo "Tag v$VERSION already exists; skipping the version/tag step."
+              exit 0
+            fi
+            # No bump: release the current version (checks, CHANGELOG, commit, tag, push).
+            node scripts/release.mjs --ci --yes
+          else
+            node scripts/release.mjs "$VERSION_INPUT" --ci --yes
+          fi
+
+      - name: Resolve tag
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG does not exist on the remote after the version step."; exit 1
+          fi
+          # Build exactly what the tag points at (matters for `current`, when the branch is ahead of the tag).
+          git checkout --detach "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Pack tarball
+        id: pack
+        run: |
+          pnpm run build
+          mkdir -p "$RUNNER_TEMP/pack"
+          pnpm pack --pack-destination "$RUNNER_TEMP/pack"
+          FILE=$(ls "$RUNNER_TEMP"/pack/*.tgz)
+          # Version-less copy (<unscoped-name>.tgz) so that .../releases/latest/download/<name>.tgz never changes.
+          BASE=$(node -p "require('./package.json').name.replace(/^@[^/]+\\//, '')")
+          cp "$FILE" "$RUNNER_TEMP/pack/$BASE.tgz"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "latest=$RUNNER_TEMP/pack/$BASE.tgz" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release
+        run: |
+          # Pull this version's section out of CHANGELOG.md
+          awk -v v="## $TAG " 'index($0, v)==1 {f=1; next} /^## v/ {f=0} f' CHANGELOG.md > notes.md || true
+          [ -s notes.md ] || echo "Release $TAG" > notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$PACK_FILE" "$PACK_LATEST" --clobber
+          else
+            gh release create "$TAG" "$PACK_FILE" "$PACK_LATEST" --title "$TAG" --notes-file notes.md \
+              $([ "$PRERELEASE" = "true" ] && echo --prerelease)
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          PACK_FILE: ${{ steps.pack.outputs.file }}
+          PACK_LATEST: ${{ steps.pack.outputs.latest }}
+
+  packages:
+    name: Publish to GitHub Packages
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+      REGISTRY: https://npm.pkg.github.com
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10 # package.json has no `packageManager` field, so pin the pnpm major here
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://npm.pkg.github.com
+          scope: '@${{ github.repository_owner }}'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify tag, scope and existing version
+        id: meta
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match package.json version $VERSION"; exit 1
+          fi
+          if [ "${NAME%%/*}" != "@$OWNER" ]; then
+            echo "::error::GitHub Packages requires the scope to match the repository owner: expected @$OWNER/..., got $NAME"; exit 1
+          fi
+          if [[ "$VERSION" == *-* ]]; then
+            ID=$(echo "$VERSION" | sed -E 's/^[^-]+-([a-zA-Z]+).*/\1/'); [[ "$ID" =~ ^[a-zA-Z]+$ ]] || ID=next
+            echo "tag=$ID" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+          if npm view "$NAME@$VERSION" version --registry "$REGISTRY" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+
+      # The release job already ran `check` and the smoke test; this job only needs dist/ to publish.
+      - run: pnpm run build
+        if: steps.meta.outputs.published == 'false'
+
+      - name: Publish
+        if: steps.meta.outputs.published == 'false'
+        run: |
+          # package.json's publishConfig points at npmjs.org; drop it for this (ephemeral) checkout.
+          npm pkg delete publishConfig.registry
+          npm publish --registry "$REGISTRY" --tag ${{ steps.meta.outputs.tag }} --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}

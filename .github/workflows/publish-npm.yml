@@ -1,43 +1,42 @@
-# Publishes to npm when a v* tag is pushed (e.g. by `pnpm release patch --ci`).
-# If the version is already on npm (released locally with `pnpm release`), the publish step is skipped.
+# npm channel. Run it manually: Actions → "Publish to npm" → Run workflow, entering an existing tag (e.g. v0.0.1).
+# It is independent of the GitHub Release and GitHub Packages channels.
+# If the version is already on npm, the publish step is skipped.
 #
 # Auth — pick one:
 #   A. Trusted publishing (recommended, no secret): on npmjs.com → package → Settings →
-#      Trusted Publisher → GitHub Actions, repo = <owner>/<repo>, workflow = release.yml.
+#      Trusted Publisher → GitHub Actions, repo = <owner>/<repo>, workflow = publish-npm.yml.
 #      (The package must exist first: do the very first publish locally.)
 #   B. Token: add an npm "Automation"/granular token as the repo secret NPM_TOKEN.
-name: Release
+name: Publish to npm
 
 on:
-  push:
-    tags: ['v*']
-  # Manual retry for an existing tag (e.g. the tag-push run failed for an infra reason).
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release, e.g. v1.2.3'
+        description: 'Existing tag to publish, e.g. v1.2.3'
         required: true
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: publish-npm-${{ inputs.tag }}
   cancel-in-progress: false
 
 permissions:
-  contents: write # create the GitHub Release
+  contents: read
   id-token: write # npm trusted publishing + provenance
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ env.TAG }}
-          fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+          ref: refs/tags/${{ env.TAG }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10 # package.json has no `packageManager` field, so pin the pnpm major here
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -56,9 +55,9 @@ jobs:
           fi
           if [[ "$VERSION" == *-* ]]; then
             ID=$(echo "$VERSION" | sed -E 's/^[^-]+-([a-zA-Z]+).*/\1/'); [[ "$ID" =~ ^[a-zA-Z]+$ ]] || ID=next
-            echo "tag=$ID" >> "$GITHUB_OUTPUT"; echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$ID" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=latest" >> "$GITHUB_OUTPUT"; echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
           if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
             echo "published=true" >> "$GITHUB_OUTPUT"
@@ -90,15 +89,3 @@ jobs:
           exit 1
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: GitHub Release
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          # Pull this version's section out of CHANGELOG.md
-          awk -v v="## $TAG " 'index($0, v)==1 {f=1; next} /^## v/ {f=0} f' CHANGELOG.md > notes.md || true
-          [ -s notes.md ] || echo "Release $TAG" > notes.md
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --title "$TAG" --notes-file notes.md \
-              $([ "${{ steps.meta.outputs.prerelease }}" = "true" ] && echo --prerelease)
-        env:
-          GH_TOKEN: ${{ github.token }}
