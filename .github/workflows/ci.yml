@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        node: [22, 24]
+        node: [24]
         include:
           # Catch path / shebang / bin issues on other platforms (drop if the package is Linux-only).
           - { os: macos-latest, node: 24 }
