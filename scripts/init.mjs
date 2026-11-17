@@ -111,6 +111,8 @@ rewrite('README.md', (s) => {
   return s.replace(/<!-- \/?cli -->\n/g, '');
 });
 rewrite('DEVELOPMENT.md', replaceAll);
+// CLAUDE.md: drop the template-only section, keep the generic contributor guidance.
+rewrite('CLAUDE.md', (s) => replaceAll(s).replace(/<!-- template -->[\s\S]*?<!-- \/template -->\n+/g, ''));
 rewrite('src/cli.ts', replaceAll);
 rewrite('LICENSE', (s) => s.replace(/Copyright \(c\) \d{4} .*/, `Copyright (c) ${new Date().getFullYear()} ${author}`));
 writeFileSync('CHANGELOG.md', '# Changelog\n');

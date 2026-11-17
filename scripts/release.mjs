@@ -384,7 +384,7 @@ function updateChangelog(version) {
     CHANGELOG_PATH,
     `${existing.slice(0, insertAt)}\n${buildChangelogSection(version)}${body}`.trimEnd() + '\n',
   );
-  trySh(`npx --no-install prettier --write "${CHANGELOG_PATH}"`);
+  trySh(`npx --no-install oxfmt --write "${CHANGELOG_PATH}"`);
   console.log(`→ Added CHANGELOG section for v${version}`);
 }
 

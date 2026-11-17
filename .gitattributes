@@ -1,2 +1,2 @@
-# Force LF everywhere (incl. Windows CI checkouts) so Prettier's endOfLine: "lf" passes.
+# Force LF everywhere (incl. Windows CI checkouts) so oxfmt's endOfLine: "lf" passes.
 * text=auto eol=lf

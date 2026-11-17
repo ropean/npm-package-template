@@ -47,7 +47,7 @@ scripts/release.mjs   幂等发版：检查 → 发布 → CHANGELOG → commit 
 | `pnpm test`           | 跑单测；`pnpm test:watch` 监听模式                             |
 | `pnpm lint`           | oxlint                                                         |
 | `pnpm typecheck`      | `tsc --noEmit`                                                 |
-| `pnpm format`         | prettier 格式化全部文件                                        |
+| `pnpm format`         | oxfmt 格式化全部文件                                           |
 | `pnpm check:exports`  | publint + are-the-types-wrong，检查 `exports`/类型声明是否正确 |
 | `pnpm check`          | 以上全部，逐项打印 PASS/FAIL（`--bail` 遇错即停）              |
 | `pnpm smoke`          | 模拟真实安装的冒烟测试（`--keep` 保留临时项目方便排查）        |
