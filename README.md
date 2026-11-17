@@ -11,6 +11,18 @@ TODO: one-line description
 pnpm add @ropean/npm-package-template
 ```
 
+### From a GitHub Release
+
+Every release also attaches the packed tarball, which is handy when the npm registry is not an option:
+
+```sh
+npm i -g https://github.com/ropean/npm-package-template/releases/latest/download/npm-package-template.tgz
+```
+
+This URL always points at the latest release. **To update, run the same command again** (`npm update -g` does not
+track packages installed from a URL). To pin a version, use
+`https://github.com/ropean/npm-package-template/releases/download/vX.Y.Z/npm-package-template.tgz`.
+
 ## Usage
 
 ```ts

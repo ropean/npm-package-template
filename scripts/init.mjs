@@ -101,6 +101,7 @@ const replaceAll = (s) =>
   s
     .replaceAll(TEMPLATE.name, name)
     .replaceAll(TEMPLATE.repo, repo)
+    .replaceAll(`${TEMPLATE.name.replace(/^@[^/]+\//, '')}.tgz`, `${unscoped}.tgz`)
     .replaceAll(TEMPLATE.bin, bin || unscoped)
     .replaceAll(TEMPLATE.description, description || TEMPLATE.description);
 
